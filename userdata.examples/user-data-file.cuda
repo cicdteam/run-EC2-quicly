@@ -1,0 +1,49 @@
+#!/bin/bash
+
+NVIDIA_DRV_VER='367.57'
+NVIDIA_DOCKER_VER='1.0.1'
+CUDA_VER='8.0-cudnn5-runtime-ubuntu16.04'
+
+echo 'INSTALL LINUX IMAGE EXTRA'
+add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) main universe"
+apt-get -yq update
+apt-get -yq install linux-image-extra-$(uname -r)
+apt-get -yq update
+
+echo 'INSTALL DOCKER'
+curl -sSL https://get.docker.com | sh
+usermod -aG docker ubuntu
+
+if [ "$(lspci | grep NVIDIA)" ]; then
+    echo; echo 'DISABLE NOUVEAU DRIVER'
+    cat <<'EOF' | tee /etc/modprobe.d/blacklist-nouveau.conf >/dev/null
+blacklist nouveau
+blacklist lbm-nouveau
+options nouveau modeset=0
+alias nouveau off
+alias lbm-nouveau off
+EOF
+    echo 'options nouveau modeset=0' | tee -a /etc/modprobe.d/nouveau-kms.conf >/dev/null
+    update-initramfs -u >/dev/null 2>&1
+
+    echo "INSTALL NVIDIA DRIVER ${NVIDIA_DRV_VER}"
+    apt-get -yq install build-essential
+    wget -q -P /tmp http://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_DRV_VER}/NVIDIA-Linux-x86_64-${NVIDIA_DRV_VER}.run
+    sh /tmp/NVIDIA-Linux-x86_64-${NVIDIA_DRV_VER}.run -s
+    rm -f /tmp/NVIDIA-Linux-x86_64-${NVIDIA_DRV_VER}.run
+
+    echo 'INSTALL NVIDIA-DOCKER'
+    wget -q -P /tmp https://github.com/NVIDIA/nvidia-docker/releases/download/v${NVIDIA_DOCKER_VER}/nvidia-docker_${NVIDIA_DOCKER_VER}-1_amd64.deb
+    dpkg -i /tmp/nvidia-docker*.deb
+    rm /tmp/nvidia-docker*.deb
+
+    echo 'CLEANUP'
+    apt-get -yq purge build-essential
+    apt-get -yq autoremove
+
+    echo 'CHECK DOCKERIZED CUDA APP'
+    docker pull nvidia/cuda:${CUDA_VER} >/dev/null 2>&1
+    nvidia-docker run --rm nvidia/cuda:${CUDA_VER} nvidia-smi
+fi
+
+echo 'DONE'

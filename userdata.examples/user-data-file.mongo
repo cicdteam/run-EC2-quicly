@@ -1,0 +1,35 @@
+#!/bin/bash
+
+echo 'INSTALL LINUX IMAGE EXTRA'
+add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) main universe"
+apt-get -yq update
+apt-get -yq install linux-image-extra-$(uname -r)
+apt-get -yq update
+
+echo 'INSTALL DOCKER'
+curl -sSL https://get.docker.com | sh
+usermod -aG docker ubuntu
+
+# MongoDb details:
+#
+# Predefined credentials:
+# user:   admin
+# pass:   change-password-to-strong
+# authDB: admin
+#
+# Persistent DB storage: /data
+# Access port:           27017
+#
+echo 'Pull docker image and run MongoDB server'
+docker pull mongo:3.2.10 >/dev/null 2>&1
+docker run -d -p 27017:27017 --name mongo-server -v /data:/data/db mongo:3.2.10 --storageEngine wiredTiger --auth
+
+echo 'Configure admin user with predefined password'
+cat | docker exec -i mongo-server mongo admin <<'EOF'
+db.createUser({ user: 'admin', pwd: 'change-password-to-strong', roles: [ { role: "userAdminAnyDatabase", db: "admin" } ] });
+EOF
+
+echo 'Check authenticated connection to MongoDb'
+echo 'show dbs' | docker exec -i mongo-server mongo -u admin -p change-password-to-strong --authenticationDatabase admin
+
+echo 'DONE'

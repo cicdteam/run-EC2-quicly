@@ -1,0 +1,241 @@
+#!/bin/bash
+
+aws_tag='temp-node'
+userdata='user-data-file'
+ec2type='t2.small'
+
+redcolor () {
+    echo -e "\033[1;31m$1\033[0m"
+}
+
+greencolor () {
+    echo -e "\033[1;32m$1\033[0m"
+}
+
+die () {
+    echo; redcolor "$1"; echo; exit 1
+}
+
+[ -z "$AWS_DEFAULT_REGION" ]    && die "AWS region not specified"
+[ -z "$AWS_ACCESS_KEY_ID" ]     && die "AWS access key not specified"
+[ -z "$AWS_SECRET_ACCESS_KEY" ] && die "AWS secret key not specified"
+
+usage () {
+    echo "Usage: $(basename $0) <command>"
+    cat <<-'EOT'
+
+Commands:
+
+    help	display this help and exit
+
+    noderun	launch  dev node
+    nodedel	remove  dev node
+    status	check node running
+    ssh		ssh into running node
+
+EOT
+}
+
+check_utils () {
+    greencolor 'Checking utils'
+    [ -z "$(which aws)" ]   && die "AWS Command Line Interface not found! Please install it by 'sudo pip install awscli' for Linux or 'brew install awscli' for Mac"
+    [ -z "$(which unzip)" ] && die "Unzip not found! Please install it by 'sudo apt-get install unzip' for Linux or 'brew install unzip' for Mac"
+    [ -z "$(which jq)" ]    && die "Command-line JSON processor not found! Please install it by 'sudo apt-get install jq'"
+    [ -z "$(which curl)" ]  && die "curl not found! Please install it"
+    [ -z "$(which ssh)" ]   && die "ssh not found! Please install it"
+    [ -z "$(which grep)" ]  && die "grep not found! Please install it"
+    [ -z "$(which awk)" ]   && die "awk not found! Please install it"
+    [ -z "$(which mktemp)" ] && die "mktemp not found! Please install it"
+}
+
+
+sshrun () {
+    [ -z $nodeIP ] && die "Node IP mot specified"
+    ssh -i ${aws_tag}.pem -o StrictHostKeyChecking=no ubuntu@${nodeIP} $1
+}
+
+sshterm () {
+    [ -z $nodeIP ] && die "Node IP mot specified"
+    ssh -i ${aws_tag}.pem -o StrictHostKeyChecking=no -t ubuntu@${nodeIP} $1
+}
+
+create_vpc () {
+    greencolor 'Adding AWS resources'
+    if [ -z $vpcId ]; then
+        echo 'Creating VPC'; vpcId=$(aws ec2 create-vpc --cidr-block 10.222.0.0/16 | jq -r '.Vpc.VpcId')
+        echo 'Tagging VPC'; aws ec2 create-tags --resources $vpcId --tags Key=Name,Value=$aws_tag
+    fi
+    if [ -z $subnetId ]; then
+        echo 'Creating Subnet'; subnetId=$(aws ec2 create-subnet --vpc-id $vpcId  --cidr-block 10.222.222.0/24 | jq -r '.Subnet.SubnetId')
+        echo 'Modify Subnet for public IPs'; aws ec2 modify-subnet-attribute --subnet-id $subnetId --map-public-ip-on-launch
+        echo 'Tagging Subnet'; aws ec2 create-tags --resources $subnetId --tags Key=Name,Value=$aws_tag
+    fi
+    if [ -z $gatewayId ]; then
+        echo 'Creating  Internet Gateway'; gatewayId=$(aws ec2 create-internet-gateway | jq -r '.InternetGateway.InternetGatewayId')
+        echo 'Tagging Gateway'; aws ec2 create-tags --resources $gatewayId --tags Key=Name,Value=$aws_tag
+        echo 'Attaching Gateway to VPC'; aws ec2 attach-internet-gateway --vpc-id $vpcId --internet-gateway-id $gatewayId
+    fi
+    if [ -z $rtId ]; then
+        echo 'Obtaining Default Route table Id'; rtId=`aws ec2 describe-route-tables --filters Name=vpc-id,Values=$vpcId | jq -r '.RouteTables[]|select(.Associations[].Main == true)|.RouteTableId'`
+        echo 'Tagging Route Table'; aws ec2 create-tags --resources $rtId --tags Key=Name,Value=$aws_tag
+        echo 'Adding default route'; aws ec2 create-route --route-table-id $rtId --destination-cidr-block 0.0.0.0/0 --gateway-id $gatewayId >/dev/null
+        echo 'Attaching Subnet to Route Table'; aws ec2 associate-route-table --subnet-id $subnetId --route-table-id $rtId >/dev/null
+    fi
+    if [ -z $groupId ]; then
+        echo 'Creating Security Group'; groupId=$(aws ec2 create-security-group --group-name $aws_tag --description $aws_tag --vpc-id $vpcId | jq -r '.GroupId')
+        echo 'Tagging group'; aws ec2 create-tags --resources $groupId --tags Key=Name,Value=$aws_tag
+        echo 'Adding open rule to group'; aws ec2 authorize-security-group-ingress --group-id $groupId --ip-permissions '[{"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]'
+    fi
+    if [ "$kpName" != "$aws_tag" ]; then
+        echo 'Creating KeyPair'
+        [ -f ${aws_tag}.pem ] && rm -f ${aws_tag}.pem
+        aws ec2 create-key-pair --key-name $aws_tag --query 'KeyMaterial' --output text > ${aws_tag}.pem
+        chmod 0400 ${aws_tag}.pem
+    fi
+}
+
+get_vpc () {
+    greencolor 'Getting data about VPC'
+    vpcId=$(aws ec2 describe-vpcs --filters Name=tag-value,Values=$aws_tag | jq -r '.Vpcs[].VpcId')
+    subnetId=$(aws ec2 describe-subnets --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.Subnets[].SubnetId')
+    groupId=$(aws ec2 describe-security-groups --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.SecurityGroups[].GroupId')
+    rtId=$(aws ec2 describe-route-tables --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.RouteTables[].RouteTableId')
+    gatewayId=$(aws ec2 describe-internet-gateways --filters Name=tag-value,Values=$aws_tag Name=attachment.vpc-id,Values=$vpcId | jq -r '.InternetGateways[].InternetGatewayId')
+    kpName=`aws ec2 describe-key-pairs | jq -r '.KeyPairs[]|select(.KeyName == "gpu-rest-dev")|.KeyName'`
+}
+
+del_vpc () {
+    greencolor "Removing AWS resources"
+    echo 'Deleting Security Group'; aws ec2 delete-security-group --group-id $groupId || die 'Something wrong, try again'
+    echo 'Deleting Subnet'; aws ec2 delete-subnet --subnet-id $subnetId || die 'Something wrong, try again'
+    echo 'Detaching Internet Gateway'; aws ec2 detach-internet-gateway --internet-gateway-id $gatewayId --vpc-id $vpcId || die 'Something wrong, try again'
+    echo 'Deleting Internet Gateway'; aws ec2 delete-internet-gateway --internet-gateway-id $gatewayId || die 'Something wrong, try again'
+    echo 'Deleting VPC'; aws ec2 delete-vpc --vpc-id $vpcId || die 'Something wrong, try again'
+    echo 'Deleting KeyPair'; aws ec2 delete-key-pair --key-name ${aws_tag}; [ -f ${aws_tag}.pem ] && rm -f ${aws_tag}.pem || die 'Something wrong, try again'
+    greencolor 'AWS resources removed'
+}
+
+del_node () {
+    greencolor 'Deleting Instance'
+    aws ec2 terminate-instances --instance-ids $nodeId >/dev/null 2>&1
+    echo 'Waiting while Instance gone'
+    while [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name')" != "terminated" ]; do
+        echo -n '.'
+        sleep 1
+    done
+    echo
+    greencolor 'Instance removed'
+}
+
+get_ami () {
+    ami=$(curl -sSL http://cloud-images.ubuntu.com/query/xenial/server/released.current.txt \
+        | grep $AWS_DEFAULT_REGION | grep amd64 | grep hvm | grep ebs-ssd | awk '{print $8}')
+    [ -z "$ami" ] && die "AMI image not found"
+}
+
+create_node () {
+    [ "$nodeId" ] && die "Instance already launched"
+    greencolor "Launching $ec2type Instance on AWS"
+    echo 'Obtaining AMI if for Ubuntu 16.04'; get_ami
+    echo 'Checking userdata file present'
+    [ -f $userdata ] || die "User-data $userdata file not found"
+    echo 'Running instance'
+    node=$(aws ec2 run-instances \
+        --image-id "$ami" \
+        --key-name "$aws_tag" \
+        --security-group-ids "$groupId" \
+        --instance-type "$ec2type" \
+        --subnet-id "$subnetId" \
+        --user-data file://${userdata})
+    nodeId=$(echo $node | jq -r '.Instances[].InstanceId')
+    [ -z "$nodeId" ] && die "Instance not started!"
+    echo 'Tagging instance'; aws ec2 create-tags --resources $nodeId --tags Key=Name,Value=$aws_tag
+    echo 'Waiting while instance initalized'
+    while [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name')" != "running"  ]; do
+        echo -n '.'
+        sleep 1
+    done
+    echo
+    nodeIP=$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].PublicIpAddress')
+}
+
+get_node () {
+    greencolor 'Getting data about instance'
+    nodeId=$(aws ec2 describe-instances --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.Reservations[].Instances[].InstanceId')
+    nodeIP=$(aws ec2 describe-instances --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.Reservations[].Instances[].PublicIpAddress')
+}
+
+status () {
+    if [ "$vpcId"  ]; then echo 'AWS VPC and correspoinding resoures created'; else echo 'VPC not found'; fi
+    if [ "$nodeId" ]
+        then
+            echo 'Instance started'
+            echo "How to login: ssh -i ${aws_tag}.pem ubuntu@${nodeIP}"
+        else
+            echo 'Instance NOT started'
+    fi
+}
+
+
+wait_node () {
+    greencolor 'Waitng for node'
+    echo 'Checking ssh connection'
+    while ! ssh -i ${aws_tag}.pem -o StrictHostKeyChecking=no -o ConnectTimeout=1 ubuntu@${nodeIP} uname >/dev/null 2>&1
+        do
+            echo -n '.'
+            sleep 1
+        done
+    echo
+    echo 'Connected'
+
+    echo 'Waiting while orchestration finished'
+    while ! sshrun "[ -f /run/cloud-init/result.json ]"
+        do
+            echo -n '.'
+            sleep 2
+        done
+    echo
+    greencolor 'Instance ready!'
+}
+
+initiate () {
+    check_utils
+    get_vpc
+    get_node
+}
+
+#
+# main
+#
+
+echo -e "\033[1;37m"
+echo -e "=== Dev AWS infra and Instance ==="
+echo -e "\033[0m"
+
+case "$1" in
+    help)
+        usage
+        ;;
+    noderun)
+        initiate
+        create_vpc
+        create_node
+        wait_node
+        ;;
+    nodedel)
+        initiate
+        del_node
+        del_vpc
+        ;;
+    status)
+        initiate
+        status
+        ;;
+    ssh)
+        initiate
+        sshterm
+        ;;
+    *)
+        usage
+        ;;
+esac
