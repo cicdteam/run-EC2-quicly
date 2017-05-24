@@ -1,0 +1,402 @@
+#!/bin/bash
+
+# login credentials to access Kubernetes dashboard over http://<ip_of_host>
+dashboard_user='admin'
+dashboard_pass='single'
+
+
+echo 'SET HOSTNAME'
+sudo apt-get -yq update
+sudo apt-get -yq install curl ca-certificates openssl
+echo 'k8s-single' | sudo tee /etc/hostname
+echo "$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)  k8s-single" | sudo tee -a /etc/hosts
+sudo hostname k8s-single
+
+
+echo 'INSTALL LINUX IMAGE EXTRA'
+sudo add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) main universe"
+sudo apt-get -yq update
+sudo apt-get -yq install linux-image-extra-$(uname -r)
+sudo apt-get -yq update
+
+echo 'INSTALL DOCKER'
+curl -sSL https://get.docker.com | sh
+usermod -aG docker ubuntu
+
+echo 'INSTALL KUBERNETES SINGLE NODE'
+sudo apt-get -yq install apt-transport-https curl
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+echo 'deb http://apt.kubernetes.io/ kubernetes-xenial main' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get -yq update
+sudo apt-get -yq install -y kubelet kubeadm kubectl kubernetes-cni
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+
+sudo cp /etc/kubernetes/admin.conf /home/ubuntu/
+sudo chown ubuntu:ubuntu /home/ubuntu/admin.conf
+export KUBECONFIG=/home/ubuntu/admin.conf
+echo 'export KUBECONFIG=/home/ubuntu/admin.conf' | sudo tee -a /home/ubuntu/.bashrc
+echo 'source <(kubectl completion bash)' | sudo tee -a /home/ubuntu/.bashrc
+
+# allow run users pods over master node (let it be single-node cluster)
+kubectl taint nodes --all node-role.kubernetes.io/master-
+
+# install network addon (flannel)
+cat <<'EOF' | kubectl apply -f -
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: flannel
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/status
+    verbs:
+      - patch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: flannel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flannel
+subjects:
+- kind: ServiceAccount
+  name: flannel
+  namespace: kube-system
+EOF
+
+cat <<'EOF' | kubectl apply -f -
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flannel
+  namespace: kube-system
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kube-flannel-cfg
+  namespace: kube-system
+  labels:
+    tier: node
+    app: flannel
+data:
+  cni-conf.json: |
+    {
+      "name": "cbr0",
+      "type": "flannel",
+      "delegate": {
+        "isDefaultGateway": true
+      }
+    }
+  net-conf.json: |
+    {
+      "Network": "10.244.0.0/16",
+      "Backend": {
+        "Type": "vxlan"
+      }
+    }
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: kube-flannel-ds
+  namespace: kube-system
+  labels:
+    tier: node
+    app: flannel
+spec:
+  template:
+    metadata:
+      labels:
+        tier: node
+        app: flannel
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        beta.kubernetes.io/arch: amd64
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      serviceAccountName: flannel
+      containers:
+      - name: kube-flannel
+        image: quay.io/coreos/flannel:v0.7.1-amd64
+        command: [ "/opt/bin/flanneld", "--ip-masq", "--kube-subnet-mgr" ]
+        securityContext:
+          privileged: true
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: run
+          mountPath: /run
+        - name: flannel-cfg
+          mountPath: /etc/kube-flannel/
+      - name: install-cni
+        image: quay.io/coreos/flannel:v0.7.1-amd64
+        command: [ "/bin/sh", "-c", "set -e -x; cp -f /etc/kube-flannel/cni-conf.json /etc/cni/net.d/10-flannel.conf; while true; do sleep 3600; done" ]
+        volumeMounts:
+        - name: cni
+          mountPath: /etc/cni/net.d
+        - name: flannel-cfg
+          mountPath: /etc/kube-flannel/
+      volumes:
+        - name: run
+          hostPath:
+            path: /run
+        - name: cni
+          hostPath:
+            path: /etc/cni/net.d
+        - name: flannel-cfg
+          configMap:
+            name: kube-flannel-cfg
+EOF
+
+# install heapster
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: heapster
+  namespace: kube-system
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: heapster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:heapster
+subjects:
+- kind: ServiceAccount
+  name: heapster
+  namespace: kube-system
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: heapster
+  namespace: kube-system
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        task: monitoring
+        k8s-app: heapster
+    spec:
+      serviceAccountName: heapster
+      containers:
+      - name: heapster
+        image: gcr.io/google_containers/heapster-amd64:v1.3.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - /heapster
+        - --source=kubernetes:''
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    task: monitoring
+    kubernetes.io/cluster-service: 'true'
+    kubernetes.io/name: Heapster
+  name: heapster
+  namespace: kube-system
+spec:
+  ports:
+  - port: 80
+    targetPort: 8082
+  selector:
+    k8s-app: heapster
+
+EOF
+
+# install ingress-controller
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ingress
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: system:ingress
+rules:
+- apiGroups:
+  - ""
+  resources: ["configmaps","secrets","endpoints","events","services"]
+  verbs: ["list","watch","create","update","delete","get"]
+- apiGroups:
+  - ""
+  - "extensions"
+  resources: ["services","nodes","ingresses","pods","ingresses/status"]
+  verbs: ["list","watch","create","update","delete","get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: ingress
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:ingress
+subjects:
+  - kind: ServiceAccount
+    name: ingress
+    namespace: kube-system
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: nginx-ingress-controller
+  labels:
+    k8s-app: nginx-ingress-controller
+  namespace: kube-system
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: nginx-ingress-controller
+    spec:
+      hostNetwork: true
+      serviceAccountName: ingress
+      terminationGracePeriodSeconds: 60
+      containers:
+      - image: gcr.io/google_containers/nginx-ingress-controller:0.9.0-beta.5
+        name: nginx-ingress-controller
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 10254
+            scheme: HTTP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 10254
+            scheme: HTTP
+          initialDelaySeconds: 10
+          timeoutSeconds: 1
+        ports:
+        - containerPort: 80
+          hostPort: 80
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+        args:
+        - /nginx-ingress-controller
+        - --default-backend-service=$(POD_NAMESPACE)/default-http-backend
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: default-http-backend
+  namespace: kube-system
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    k8s-app: default-http-backend
+
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: default-http-backend
+  namespace: kube-system
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        k8s-app: default-http-backend
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: default-http-backend
+        image: gcr.io/google_containers/defaultbackend:1.0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        ports:
+        - containerPort: 8080
+EOF
+
+# install kubernetes-dashboard
+kubectl apply -f https://git.io/kube-dashboard
+
+# install secret with auth data for dashboard login
+kubectl -n kube-system create secret generic kubernetes-dashboard-auth --from-literal=auth=`echo "${dashboard_user}:$(openssl passwd -apr1 -noverify ${dashboard_pass})"`
+
+# install ingress resource for kubernetes dashboard
+cat <<'EOF' | kubectl apply -f -
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: kubernetes-dashboard
+  namespace: kube-system
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    ingress.kubernetes.io/ssl-redirect: "false"
+    ingress.kubernetes.io/auth-type: basic
+    ingress.kubernetes.io/auth-secret: kubernetes-dashboard-auth
+    ingress.kubernetes.io/auth-realm: "Authentication Required"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        backend:
+          serviceName: kubernetes-dashboard
+          servicePort: 80
+EOF
+
+echo 'DONE'

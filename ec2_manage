@@ -2,7 +2,7 @@
 
 aws_tag='temp-node'
 userdata='user-data-file'
-ec2type='t2.small'
+ec2type='t2.medium'
 
 redcolor () {
     echo -e "\033[1;31m$1\033[0m"
@@ -136,7 +136,7 @@ get_ami () {
 create_node () {
     [ "$nodeId" ] && die "Instance already launched"
     greencolor "Launching $ec2type Instance on AWS"
-    echo 'Obtaining AMI if for Ubuntu 16.04'; get_ami
+    echo 'Obtaining AMI id for Ubuntu 16.04'; get_ami
     echo 'Checking userdata file present'
     [ -f $userdata ] || die "User-data $userdata file not found"
     echo 'Running instance'
@@ -196,6 +196,7 @@ wait_node () {
         done
     echo
     greencolor 'Instance ready!'
+    echo "To login: ssh -i ${aws_tag}.pem ubuntu@${nodeIP}"
 }
 
 initiate () {

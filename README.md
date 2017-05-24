@@ -86,6 +86,7 @@ Connected
 Waiting while orchestration finished
 ......................
 Instance ready!
+To login: ssh -i temp-node.pem ubuntu@54.194.16.12
 ```
 
 Getting status of AWS resources
@@ -165,6 +166,12 @@ There are several examples of user-data script to use:
 
 - [userdata.examples/user-data-file.cuda](userdata.examples/user-data-file.cuda) - install Nvidia driver, docker, nvidia-docker plugin (EC2 type must be g2. or p2.)
 - [userdata.examples/user-data-file.mongo](userdata.examples/user-data-file.mongo) - install docker, run MongoDB server, configure authentication
+- [userdata.examples/user-data-file.k8s_single](userdata.examples/user-data-file.k8s_single) - install single-node [Kubernetes](https://kubernetes.io/) cluster with components:
+    - [flannel](https://kubernetes.io/docs/concepts/cluster-administration/addons/) (pod network addon)
+    - standalone [heapster](https://github.com/kubernetes/heapster)
+    - [nginx-ingresss-controller](https://github.com/kubernetes/ingress/tree/master/controllers/nginx) (with `.spec.HostNetwork: 'true'` setting) - server requests on port 80 of node
+    - [kubernetes-dashboard](https://github.com/kubernetes/dashboard) (accesible via `http://<node_public_ip_address>` with default credentials `login: admin, password: single`)
+
 
 ### Notes
 
