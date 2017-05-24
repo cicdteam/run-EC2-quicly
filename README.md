@@ -1,6 +1,6 @@
-# Run and destroy EC2 instance quicly
+# Run and destroy EC2 instance quickly
 
-Script used to quicly create AWS VPC and launch there instance. Perfect when you need
+Script used to quickly create AWS VPC and launch there instance. Perfect when you need
 start temporary Instance for tests or some work.
 
 ### Usage
@@ -19,9 +19,9 @@ export AWS_DEFAULT_REGION="us-east-1"
 
 Edit these fields in head of script before you create AWS resources:
 
-- `aws_tag='temp-node'` - used to tagg all AWS resources created by script
+- `aws_tag='temp-node'` - used to tag all AWS resources created by script
 - `userdata='user-data-file'` - location of user-data script running on first boot
-- `ec2type='t2.small'` - EC2 type or running instance
+- `ec2type='t2.medium'` - EC2 type or running instance
 
 ### Examples
 
@@ -169,8 +169,10 @@ There are several examples of user-data script to use:
 - [userdata.examples/user-data-file.k8s_single](userdata.examples/user-data-file.k8s_single) - install single-node [Kubernetes](https://kubernetes.io/) cluster with components:
     - [flannel](https://kubernetes.io/docs/concepts/cluster-administration/addons/) (pod network addon)
     - standalone [heapster](https://github.com/kubernetes/heapster)
-    - [nginx-ingresss-controller](https://github.com/kubernetes/ingress/tree/master/controllers/nginx) (with `.spec.HostNetwork: 'true'` setting) - server requests on port 80 of node
+    - [nginx-ingresss-controller](https://github.com/kubernetes/ingress/tree/master/controllers/nginx) (with `.spec.HostNetwork: 'true'`) - serve requests on port 80 of node
     - [kubernetes-dashboard](https://github.com/kubernetes/dashboard) (accesible via `http://<node_public_ip_address>` with default credentials `login: admin, password: single`)
+
+>NOTE: If you using `userdata.examples/user-data-file.k8s_single` then please wait couple of minutes while all Kubernetes components started and than try login to Kubernetes dashboard from your browser
 
 
 ### Notes
