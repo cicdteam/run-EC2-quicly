@@ -17,11 +17,13 @@ export AWS_SECRET_ACCESS_KEY="YoUrSecRetAcCesKeyHeRe"
 export AWS_DEFAULT_REGION="us-east-1"
 ```
 
-Edit these fields in head of script before you create AWS resources:
+Edit these fields in [settings](settings) file before you create AWS resources:
 
 - `aws_tag='temp-node'` - used to tag all AWS resources created by script
-- `userdata='user-data-file'` - location of user-data script running on first boot
+- `userdata='userdata.examples/user-data-file'` - location of user-data script running on first boot
 - `ec2type='t2.medium'` - EC2 type or running instance
+
+>NOTE: You can create local settings file named as `settings.local` that not synced with git repo and used to override any variables specified in [settings](settings). See [settings.local.example](settings.local.example)
 
 ### Examples
 
@@ -161,13 +163,13 @@ AWS resources removed
 
 ### User data scripts
 
-Basic user-data script resides in root of repo: [user-data-file](user-data-file). This script install docker engine on Instance.
+Basic user-data script resides in [userdata.examples/user-data-file](userdata.examples/user-data-file). This script install docker engine on Instance.
 There are several examples of user-data script to use:
 
 - [userdata.examples/user-data-file.cuda](userdata.examples/user-data-file.cuda) - install Nvidia driver, docker, nvidia-docker plugin (EC2 type must be g2. or p2.)
 - [userdata.examples/user-data-file.mongo](userdata.examples/user-data-file.mongo) - install docker, run MongoDB server, configure authentication
 - [userdata.examples/user-data-file.k8s_single](userdata.examples/user-data-file.k8s_single) - install single-node [Kubernetes](https://kubernetes.io/) cluster with components:
-    - [flannel](https://kubernetes.io/docs/concepts/cluster-administration/addons/) (pod network addon)
+    - [calico](https://kubernetes.io/docs/concepts/cluster-administration/addons/) (pod network addon)
     - standalone [heapster](https://github.com/kubernetes/heapster)
     - [nginx-ingresss-controller](https://github.com/kubernetes/ingress/tree/master/controllers/nginx) (with `.spec.HostNetwork: 'true'`) - serve requests on port 80 of node
     - [kubernetes-dashboard](https://github.com/kubernetes/dashboard) (accesible via `http://<node_public_ip_address>` with default credentials `login: admin, password: single`)

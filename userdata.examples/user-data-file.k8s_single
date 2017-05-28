@@ -1,17 +1,20 @@
 #!/bin/bash
 
+NODENAME='temp-k8s-single'
 # login credentials to access Kubernetes dashboard over http://<ip_of_host>
-dashboard_user='admin'
-dashboard_pass='single'
+DASHBOARD_USER='admin'
+DASHBOARD_PASS='single'
 
+
+
+echo 'UPDATE AND INSTALL UTILS'
+sudo apt-get -yq update
+sudo apt-get -yq install curl ca-certificates
 
 echo 'SET HOSTNAME'
-sudo apt-get -yq update
-sudo apt-get -yq install curl ca-certificates openssl
-echo 'k8s-single' | sudo tee /etc/hostname
-echo "$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)  k8s-single" | sudo tee -a /etc/hosts
-sudo hostname k8s-single
-
+echo $NODENAME | sudo tee /etc/hostname
+echo "$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4) $NODENAME" | sudo tee -a /etc/hosts
+sudo hostname $NODENAME
 
 echo 'INSTALL LINUX IMAGE EXTRA'
 sudo add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) main universe"
@@ -24,7 +27,7 @@ curl -sSL https://get.docker.com | sh
 usermod -aG docker ubuntu
 
 echo 'INSTALL KUBERNETES SINGLE NODE'
-sudo apt-get -yq install apt-transport-https curl
+sudo apt-get -yq install apt-transport-https openssl
 curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
 echo 'deb http://apt.kubernetes.io/ kubernetes-xenial main' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 sudo apt-get -yq update
@@ -496,7 +499,7 @@ EOF
 kubectl apply -f https://git.io/kube-dashboard
 
 # install secret with auth data for dashboard login
-kubectl -n kube-system create secret generic kubernetes-dashboard-auth --from-literal=auth=`echo "${dashboard_user}:$(openssl passwd -apr1 -noverify ${dashboard_pass})"`
+kubectl -n kube-system create secret generic kubernetes-dashboard-auth --from-literal=auth=`echo "${DASHBOARD_USER}:$(openssl passwd -apr1 -noverify ${DASHBOARD_PASS})"`
 
 # install ingress resource for kubernetes dashboard
 cat <<'EOF' | kubectl apply -f -

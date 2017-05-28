@@ -1,8 +1,9 @@
 #!/bin/bash
 
-aws_tag='temp-node'
-userdata='user-data-file'
-ec2type='t2.medium'
+[ -f $(dirname $0)/settings ] && source $(dirname $0)/settings
+[ -f $(dirname $0)/settings.local ] && source $(dirname $0)/settings.local
+
+
 
 redcolor () {
     echo -e "\033[1;31m$1\033[0m"

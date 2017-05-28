@@ -1,0 +1,3 @@
+aws_tag='temp-node'
+userdata='userdata.examples/user-data-file'
+ec2type='t2.medium'

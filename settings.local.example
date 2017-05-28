@@ -1,0 +1,12 @@
+# Configuration file used to ovveride some variables
+# This file not synces with GitHub repo.
+#
+# Put 'settings.local' near with 'settings' file and
+# it will be loaded AFTER main 'settings' file.
+#
+# You can override any variables specified in 'settings' file
+#
+
+aws_tag='temp-node'
+userdata='userdata.examples/user-data-file.k8s_single'
+ec2type='t2.medium'
