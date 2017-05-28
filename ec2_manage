@@ -20,6 +20,9 @@ die () {
 [ -z "$AWS_DEFAULT_REGION" ]    && die "AWS region not specified"
 [ -z "$AWS_ACCESS_KEY_ID" ]     && die "AWS access key not specified"
 [ -z "$AWS_SECRET_ACCESS_KEY" ] && die "AWS secret key not specified"
+[ -z "$aws_tag" ]               && die "'aws_tag' not specified, check your settings file"
+[ -z "$userdata" ]              && die "'userdata' not specified, check your settings file"
+[ -z "$ec2type" ]               && die "'ec2type' not specified, check your settings file"
 
 usage () {
     echo "Usage: $(basename $0) <command>"
