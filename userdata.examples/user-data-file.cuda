@@ -1,59 +1,42 @@
 #!/bin/bash
 
 NODENAME='temp-cuda'
-NVIDIA_DRV_VER='367.57'
-NVIDIA_DOCKER_VER='1.0.1'
-CUDA_VER='8.0-cudnn5-runtime-ubuntu16.04'
 
 echo 'UPDATE AND INSTALL UTILS'
 sudo apt-get -yq update
-sudo apt-get -yq install curl ca-certificates
+sudo apt-get -yq install \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    software-properties-common
 
 echo 'SET HOSTNAME'
 echo $NODENAME | sudo tee /etc/hostname
 echo "$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4) $NODENAME" | sudo tee -a /etc/hosts
 sudo hostname $NODENAME
 
-echo 'INSTALL LINUX IMAGE EXTRA'
-sudo add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) main universe"
-sudo apt-get -yq update
-sudo apt-get -yq install linux-image-extra-$(uname -r)
-sudo apt-get -yq update
-
 echo 'INSTALL DOCKER'
-curl -sSL https://get.docker.com | sh
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+sudo apt-get -yq update
+sudo apt-get -yq install docker-ce
 sudo usermod -aG docker ubuntu
+sudo docker info
 
-if [ "$(lspci | grep NVIDIA)" ]; then
-    echo; echo 'DISABLE NOUVEAU DRIVER'
-    cat <<'EOF' | sudo tee /etc/modprobe.d/blacklist-nouveau.conf >/dev/null
-blacklist nouveau
-blacklist lbm-nouveau
-options nouveau modeset=0
-alias nouveau off
-alias lbm-nouveau off
-EOF
-    echo 'options nouveau modeset=0' | sudo tee -a /etc/modprobe.d/nouveau-kms.conf >/dev/null
-    sudo update-initramfs -u >/dev/null 2>&1
-
-    echo "INSTALL NVIDIA DRIVER ${NVIDIA_DRV_VER}"
-    sudo apt-get -yq install build-essential
-    wget -q -P /tmp http://us.download.nvidia.com/XFree86/Linux-x86_64/${NVIDIA_DRV_VER}/NVIDIA-Linux-x86_64-${NVIDIA_DRV_VER}.run
-    sudo sh /tmp/NVIDIA-Linux-x86_64-${NVIDIA_DRV_VER}.run -s
-    rm -f /tmp/NVIDIA-Linux-x86_64-${NVIDIA_DRV_VER}.run
+if [ "$(lspci | grep -i nvidia)" ]; then
+    echo 'INSTALL NVIDIA GPU-CARD SUPPORT'
+    wget -q http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
+    sudo dpkg -i cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
+    rm -f cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
+    sudo apt-get -yq update
+    sudo apt-get -yq install cuda-drivers --no-install-recommends
+    nvidia-smi
 
     echo 'INSTALL NVIDIA-DOCKER'
-    wget -q -P /tmp https://github.com/NVIDIA/nvidia-docker/releases/download/v${NVIDIA_DOCKER_VER}/nvidia-docker_${NVIDIA_DOCKER_VER}-1_amd64.deb
-    sudo dpkg -i /tmp/nvidia-docker*.deb
-    rm /tmp/nvidia-docker*.deb
-
-    echo 'CLEANUP'
-    sudo apt-get -yq purge build-essential
-    sudo apt-get -yq autoremove
-
-    echo 'CHECK DOCKERIZED CUDA APP'
-    sudo docker pull nvidia/cuda:${CUDA_VER} >/dev/null 2>&1
-    sudo nvidia-docker run --rm nvidia/cuda:${CUDA_VER} nvidia-smi
+    wget -P /tmp https://github.com/NVIDIA/nvidia-docker/releases/download/v1.0.1/nvidia-docker_1.0.1-1_amd64.deb
+    sudo dpkg -i /tmp/nvidia-docker*.deb && rm /tmp/nvidia-docker*.deb
+    sudo systemctl restart nvidia-docker.service
+    sudo nvidia-docker run --rm nvidia/cuda nvidia-smi
 fi
 
 echo 'DONE'

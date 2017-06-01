@@ -1,0 +1,14 @@
+#!/bin/bash
+
+NODENAME='temp-node'
+
+echo 'UPDATE AND INSTALL UTILS'
+sudo apt-get -yq update
+sudo apt-get -yq install curl ca-certificates
+
+echo 'SET HOSTNAME'
+echo $NODENAME | sudo tee /etc/hostname
+echo "$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4) $NODENAME" | sudo tee -a /etc/hosts
+sudo hostname $NODENAME
+
+echo 'DONE'
