@@ -105,7 +105,7 @@ get_vpc () {
     groupId=$(aws ec2 describe-security-groups --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.SecurityGroups[].GroupId')
     rtId=$(aws ec2 describe-route-tables --filters Name=tag-value,Values=$aws_tag Name=vpc-id,Values=$vpcId | jq -r '.RouteTables[].RouteTableId')
     gatewayId=$(aws ec2 describe-internet-gateways --filters Name=tag-value,Values=$aws_tag Name=attachment.vpc-id,Values=$vpcId | jq -r '.InternetGateways[].InternetGatewayId')
-    kpName=`aws ec2 describe-key-pairs | jq -r '.KeyPairs[]|select(.KeyName == "gpu-rest-dev")|.KeyName'`
+    kpName=`aws ec2 describe-key-pairs | jq -r ".KeyPairs[]|select(.KeyName == \"$aws_tag\")|.KeyName"`
 }
 
 del_vpc () {

@@ -29,7 +29,7 @@ if [ "$(lspci | grep -i nvidia)" ]; then
     sudo dpkg -i cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
     rm -f cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
     sudo apt-get -yq update
-    sudo apt-get -yq install cuda-drivers --no-install-recommends
+    sudo apt-get -yq install nvidia-375 nvidia-modprobe libcuda1-375 --no-install-recommends
     nvidia-smi
 
     echo 'INSTALL NVIDIA-DOCKER'
