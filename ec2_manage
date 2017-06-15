@@ -110,12 +110,12 @@ get_vpc () {
 
 del_vpc () {
     greencolor "Removing AWS resources"
-    echo 'Deleting Security Group'; aws ec2 delete-security-group --group-id $groupId || die 'Something wrong, try again'
-    echo 'Deleting Subnet'; aws ec2 delete-subnet --subnet-id $subnetId || die 'Something wrong, try again'
-    echo 'Detaching Internet Gateway'; aws ec2 detach-internet-gateway --internet-gateway-id $gatewayId --vpc-id $vpcId || die 'Something wrong, try again'
-    echo 'Deleting Internet Gateway'; aws ec2 delete-internet-gateway --internet-gateway-id $gatewayId || die 'Something wrong, try again'
-    echo 'Deleting VPC'; aws ec2 delete-vpc --vpc-id $vpcId || die 'Something wrong, try again'
-    echo 'Deleting KeyPair'; aws ec2 delete-key-pair --key-name ${aws_tag}; [ -f ${aws_tag}.pem ] && rm -f ${aws_tag}.pem || die 'Something wrong, try again'
+    [ "$groupId" ]  && (echo 'Deleting Security Group'; aws ec2 delete-security-group --group-id $groupId || die 'Something wrong, try again')
+    [ "$subnetId" ] && (echo 'Deleting Subnet'; aws ec2 delete-subnet --subnet-id $subnetId || die 'Something wrong, try again')
+    [ "$gatewayId" -a "$vpcId" ] && (echo 'Detaching Internet Gateway'; aws ec2 detach-internet-gateway --internet-gateway-id $gatewayId --vpc-id $vpcId || die 'Something wrong, try again')
+    [ "$gatewayId" ] && (echo 'Deleting Internet Gateway'; aws ec2 delete-internet-gateway --internet-gateway-id $gatewayId || die 'Something wrong, try again')
+    [ "$vpcId" ] && (echo 'Deleting VPC'; aws ec2 delete-vpc --vpc-id $vpcId || die 'Something wrong, try again')
+    [ -f "${aws_tag}".pem ] && (echo 'Deleting KeyPair'; rm -f "${aws_tag}".pem; aws ec2 delete-key-pair --key-name ${aws_tag} || die 'Something wrong, try again')
     greencolor 'AWS resources removed'
 }
 
@@ -123,7 +123,7 @@ del_node () {
     greencolor 'Deleting Instance'
     aws ec2 terminate-instances --instance-ids $nodeId >/dev/null 2>&1
     echo 'Waiting while Instance gone'
-    while [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name')" != "terminated" ]; do
+    while [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name' | uniq)" != "terminated" ]; do
         echo -n '.'
         sleep 1
     done
