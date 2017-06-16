@@ -121,13 +121,15 @@ del_vpc () {
 
 del_node () {
     greencolor 'Deleting Instance'
-    aws ec2 terminate-instances --instance-ids $nodeId >/dev/null 2>&1
-    echo 'Waiting while Instance gone'
-    while [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name' | uniq)" != "terminated" ]; do
-        echo -n '.'
-        sleep 1
-    done
-    echo
+    if [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name' | uniq)" ]; then
+        aws ec2 terminate-instances --instance-ids $nodeId >/dev/null 2>&1
+        echo 'Waiting while Instance gone'
+        while [ "$(aws ec2 describe-instances --instance-ids $nodeId | jq -r '.Reservations[].Instances[].State.Name' | uniq)" != "terminated" ]; do
+            echo -n '.'
+            sleep 1
+        done
+        echo
+    fi
     greencolor 'Instance removed'
 }
 
